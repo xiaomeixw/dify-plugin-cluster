@@ -24,29 +24,65 @@ This project implements a complete cluster load balancing solution within Dify P
 ### Cluster Topology
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    Dify Plugin Cluster                      │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────┐   │
-│  │    Node 1    │    │    Node 2    │    │    Node N    │   │
-│  │   (Master)   │    │   (Worker)   │    │   (Worker)   │   │
-│  │              │    │              │    │              │   │
-│  │ ┌──────────┐ │    │ ┌──────────┐ │    │ ┌──────────┐ │   │
-│  │ │LoadBalancer│    │ │LoadBalancer│    │ │LoadBalancer│   │
-│  │ └──────────┘ │    │ └──────────┘ │    │ └──────────┘ │   │
-│  │              │    │              │    │              │   │
-│  │ ┌──────────┐ │    │ ┌──────────┐ │    │ ┌──────────┐ │   │
-│  │ │ Plugins  │ │    │ │ Plugins  │ │    │ │ Plugins  │ │   │
-│  │ └──────────┘ │    │ └──────────┘ │    │ └──────────┘ │   │
-│  └──────────────┘    └──────────────┘    └──────────────┘   │
-│                                                             │
-│  ┌─────────────────────────────────────────────────────────┐ │
-│  │                  Redis Coordination Center               │ │
-│  │  • Node Management  • Request Stats  • Master Election │ │
-│  │  • Long Req Detection • Health Check • Config Sync     │ │
-│  └─────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
+                      Dify Plugin Distributed Cluster Architecture
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                          Dify Main Server                               │
+│                          192.168.1.10                                   │
+├─────────────────────────────────────────────────────────────────────────┤
+│  ┌─────────────────┐    ┌───────────────────────────────────────────┐   │
+│  │   Dify Server   │    │         Main Plugin Node                  │   │
+│  │                 │    │      (dify-plugin-daemon)                 │   │
+│  │ PLUGIN_DAEMON_  │───▶│                                           │   │
+│  │ URL=localhost   │    │  ┌─────────────────────────────────────┐  │   │
+│  │ :5002           │    │  │        Load Balancer                │  │   │
+│  │                 │    │  │    (Smart Request Routing)          │  │   │
+│  └─────────────────┘    │  └─────────────────────────────────────┘  │   │
+│                         │  ┌─────────────────────────────────────┐  │   │
+│                         │  │        Plugin Executor              │  │   │
+│                         │  │    (Local Plugin Processing)        │  │   │
+│                         │  └─────────────────────────────────────┘  │   │
+│                         └───────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────────┘
+                                          │
+                                          │ Request Forwarding/Load Balancing
+                                          ▼
+          ┌───────────────────────────────┼───────────────────────────────┐
+          │                               │                               │
+          ▼                               ▼                               ▼
+┌─────────────────┐            ┌─────────────────┐            ┌─────────────────┐
+│  Plugin Node 2  │            │  Plugin Node 3  │            │  Plugin Node 4  │
+│ 192.168.1.11    │            │ 192.168.1.12    │            │ 192.168.1.13    │
+├─────────────────┤            ├─────────────────┤            ├─────────────────┤
+│ ┌─────────────┐ │            │ ┌─────────────┐ │            │ ┌─────────────┐ │
+│ │   Plugins   │ │            │ │   Plugins   │ │            │ │   Plugins   │ │
+│ │  Executor   │ │            │ │  Executor   │ │            │ │  Executor   │ │
+│ └─────────────┘ │            │ └─────────────┘ │            │ └─────────────┘ │
+│                 │            │                 │            │                 │
+│ ┌─────────────┐ │            │ ┌─────────────┐ │            │ ┌─────────────┐ │
+│ │ Node Status │ │            │ │ Node Status │ │            │ │ Node Status │ │
+│ │  Reporter   │ │            │ │  Reporter   │ │            │ │  Reporter   │ │
+│ └─────────────┘ │            │ └─────────────┘ │            │ └─────────────┘ │
+└─────────────────┘            └─────────────────┘            └─────────────────┘
+          │                               │                               │
+          │                               │                               │
+          └───────────────────────────────┼───────────────────────────────┘
+                                          │
+                                          ▼
+                            ┌─────────────────────────┐
+                            │  Redis Coordination     │
+                            │   192.168.1.100:6379   │
+                            ├─────────────────────────┤
+                            │ • Node Status Mgmt      │
+                            │ • Request Statistics    │
+                            │ • Master Election Vote  │
+                            │ • Long Request Cache    │
+                            │ • Health Check Heartbeat│
+                            │ • Cluster Config Sync   │
+                            └─────────────────────────┘
+
+Request Flow:
+Dify Server → Main Plugin Node → Load Balancing Decision → Forward to Optimal Node or Local Processing
 ```
 
 ### Intelligent Load Balancing Strategy
@@ -126,23 +162,101 @@ graph TD
 
 #### 2. Node Selection Strategy
 
+**Single-Node Scenario**:
+```
+All Requests ──▶ Main Plugin Node (Local processing)
+                 │
+                 ├─ Short Requests: Direct local execution
+                 └─ Long Requests: Direct local execution
+```
+
 **Two-Node Scenario**:
 ```
-Short Requests ──▶ Node 1 (Dedicated for short requests)
+Short Requests ──▶ Main Plugin Node (Priority local processing)
                    │
                    ▼
-Long Requests ──▶ Smart Decision
-                   ├─ Node 2 Idle ──▶ Node 2
-                   ├─ Node 2 Busy with Long Req ──▶ Node 2
-                   └─ Node 2 Busy & Node 1 Idle ──▶ Node 1
+Long Requests ──▶ Smart Load Balancing Decision
+                   ├─ Remote Node Idle ──▶ Forward to Remote Node
+                   ├─ Remote Node Busy with Long Req ──▶ Continue to Remote Node
+                   └─ Remote Node Busy & Main Node Idle ──▶ Main Node local processing
 ```
 
 **Multi-Node Scenario**:
 ```
-Short Requests ──▶ Node 1 (Dedicated for short requests)
+Short Requests ──▶ Main Plugin Node (Dedicated local processing for short requests)
 
-Long Requests ──▶ Node 2, 3, 4, ..., N (Round-robin distribution)
+Long Requests ──▶ Round-robin distribution to other nodes
+                   ├─ Plugin Node 2
+                   ├─ Plugin Node 3  
+                   └─ Plugin Node N
 ```
+
+#### 3. Detailed Load Balancing Implementation
+
+**Request Processing Flow**:
+```
+1. Dify Server sends request to Main Plugin Node
+2. RedirectPluginInvoke middleware intercepts request
+3. Get available nodes for plugin: FetchPluginAvailableNodesById()
+4. Set urlPath to context: ctx.Set("urlPath", ctx.Request.URL.Path)
+5. Load balancer selects node: LoadBalancer.SelectNode(ctx, nodes)
+6. Determine request type: IsLongRequest(ctx, urlPath)
+7. Execute request:
+   ├─ Local execution: handleLocalRequest()
+   └─ Remote forwarding: handleRemoteRequestWithForwardHeader()
+```
+
+**Node Status Management**:
+```
+Request start: UpdateNodeStatus(nodeId, true, isLong)   // Mark as busy
+Request end:   UpdateNodeStatus(nodeId, false, isLong) // Mark as idle
+
+Status information stored in Redis:
+- is_working: Whether node is processing requests
+- is_long_request: Whether current processing is long request
+- last_update: Status last update time
+```
+
+**Request Statistics Update**:
+```
+After each request completion:
+1. Calculate execution time: duration = time.Since(startTime)
+2. Update request stats: UpdateRequestStats(ctx, urlPath, duration)
+3. Maintain average time of recent 5 requests
+4. If average time > 5000ms, mark as long request
+```
+
+**Anti-Loop Forwarding Mechanism**:
+```
+Set Header when forwarding: X-Plugin-Forwarded: true
+Receiver checks this Header to prevent infinite forwarding loops
+```
+
+#### 4. Load Balancing Core Philosophy
+
+**Overall Design Philosophy**:
+This load balancing system's core idea is **intelligent distribution based on request response time**, optimizing overall cluster performance by distinguishing between "long requests" and "short requests". The design principle is: short requests are frequent and latency-sensitive, should be processed locally; long requests are time-consuming but less sensitive to network latency, can be distributed to other nodes.
+
+**Request Type Recognition Mechanism**:
+The system continuously monitors the response time of each API endpoint, maintaining a sliding window of the most recent 5 requests. When an endpoint's average response time exceeds 5000 milliseconds, it gets marked as a "long request endpoint" and cached in Redis. This dynamic learning mechanism allows the system to self-adapt to different plugin performance characteristics without manual configuration.
+
+**Layered Load Balancing Strategy**:
+The system adopts different load balancing strategies based on cluster scale. For single node, all requests are processed locally without load balancing. For two nodes, it uses "master-slave collaboration" mode: Main Node specializes in short requests, long requests are intelligently selected based on node status. For multiple nodes, it uses "short request localization, long request distribution" strategy: Main Node handles all short requests, long requests are round-robin distributed among other nodes.
+
+**Intelligent Node Selection Logic**:
+In two-node scenarios, the system monitors both nodes' working status in real-time. For long requests, if Remote node is idle, it forwards directly; if Remote node is processing long requests and Main node is idle, it flexibly schedules to Main node; if both nodes are busy, it prioritizes letting the dedicated Remote node continue handling long requests to avoid affecting Main node's short request processing capability.
+
+**Status Awareness and Real-time Scheduling**:
+When each request starts, the system marks the corresponding node as "working" status and records whether it's a long request. After request completion, it immediately updates to "idle" status. This real-time status management ensures the load balancer always makes decisions based on the latest node status, avoiding assigning requests to already overloaded nodes.
+
+**Performance Statistics and Self-Learning**:
+After each request completion, the system records execution time and updates corresponding endpoint statistics. By maintaining sliding window averages, the system can dynamically adjust "long/short request" judgments for different endpoints, forming a self-learning load balancing system. Meanwhile, these statistical data also provide rich performance metrics for operational monitoring.
+
+**Anti-Loop and Fault Tolerance Mechanisms**:
+To avoid infinite request forwarding between nodes, the system adds special header identifiers when forwarding. Receiving nodes check this header and process directly without secondary forwarding. When exceptions occur during load balancing, the system gracefully degrades to round-robin strategy, ensuring service availability.
+
+**Architecture Advantages Summary**:
+The biggest advantage of this design is **local processing of short requests, distributed processing of long requests**. Short requests processed locally on Main Node avoid network latency, ensuring response speed for high-frequency operations; long requests distributed to other nodes avoid blocking Main Node, ensuring overall system throughput. Meanwhile, intelligent scheduling based on real-time status and dynamic learning mechanisms allow the system to self-adapt to different load patterns, achieving truly intelligent load balancing.
 
 ## 🎯 Core Features
 
@@ -180,35 +294,69 @@ Long Requests ──▶ Node 2, 3, 4, ..., N (Round-robin distribution)
 
 ### Cluster Configuration
 
-1. **Configure Redis Connection**:
+1. **Prepare Servers**:
+   - Dify Main Server: 192.168.1.10 (Running Dify + Main Plugin Node)
+   - Plugin Node 2: 192.168.1.11  
+   - Plugin Node 3: 192.168.1.12
+   - Plugin Node 4: 192.168.1.13
+
+2. **Configure Dify Main Server**:
 ```bash
-export REDIS_HOST=127.0.0.1
+# Configure on Dify main server
+export PLUGIN_DAEMON_URL=http://localhost:5002  # Point to local Main Plugin Node
+export REDIS_HOST=192.168.1.100
+export REDIS_PORT=6379
+export REDIS_PASSWORD=your-password
+
+# Start Main Plugin Node (Load balancing entry point)
+./dify-plugin-daemon --cluster-mode=true
+```
+
+3. **Configure Other Plugin Nodes** (All nodes use the same Redis instance):
+```bash
+# Configure the same Redis connection on each Plugin server
+export REDIS_HOST=192.168.1.100  # Redis server address
 export REDIS_PORT=6379
 export REDIS_PASSWORD=your-password
 ```
 
-2. **Start First Node**:
+4. **Start Plugin Node 2**:
 ```bash
-./dify-plugin-daemon --port=5001 --cluster-mode=true
+./dify-plugin-daemon --cluster-mode=true
 ```
 
-3. **Start Other Nodes**:
+5. **Start Plugin Node 3**:
 ```bash
-./dify-plugin-daemon --port=5002 --cluster-mode=true
-./dify-plugin-daemon --port=5003 --cluster-mode=true
+./dify-plugin-daemon --cluster-mode=true
+```
+
+6. **Start Plugin Node 4**:
+```bash
+./dify-plugin-daemon --cluster-mode=true
 ```
 
 ### Verify Cluster Status
 
 ```bash
+# View cluster status through Main Plugin Node
 # View cluster nodes
-curl http://localhost:5001/cluster/nodes
+curl http://192.168.1.10:5002/cluster/nodes
 
 # View load balancing statistics
-curl http://localhost:5001/cluster/stats
+curl http://192.168.1.10:5002/cluster/stats
 
-# View current master node
-curl http://localhost:5001/cluster/master
+# View current master node (Master can be any node, elected by voting)
+curl http://192.168.1.10:5002/cluster/master
+
+# Test load balancing - All requests go through Main Plugin Node
+curl -X POST http://192.168.1.10:5002/plugins/invoke \
+  -H "Content-Type: application/json" \
+  -d '{"plugin_id": "test", "method": "run"}'
+
+# You can also directly access other nodes for status (debugging only)
+curl http://192.168.1.11:5002/cluster/nodes
+curl http://192.168.1.12:5002/cluster/nodes
+curl http://192.168.1.13:5002/cluster/nodes
 ```
 
 ## 📊 Monitoring and Statistics
@@ -343,7 +491,7 @@ Issues and Pull Requests are welcome!
 
 ```bash
 # Clone project
-git clone https://github.com/your-repo/dify-plugin-daemon.git
+git clone https://github.com/xiaomeixw/dify-plugin-cluster
 
 # Install dependencies
 go mod tidy
