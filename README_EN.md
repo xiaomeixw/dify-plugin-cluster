@@ -8,6 +8,8 @@ English | [中文](./README.md)
 
 An intelligent cluster load balancing system designed for Dify Plugin Daemon, with no external dependencies like Kubernetes, implementing high-availability cluster functionality entirely built-in.
 
+![366fbece-72fe-461f-be36-cabdff46e9d8](./image/366fbece-72fe-461f-be36-cabdff46e9d8.png)
+
 ## 📋 Project Overview
 
 This project implements a complete cluster load balancing solution within Dify Plugin Daemon, featuring:
@@ -293,6 +295,8 @@ The biggest advantage of this design is **local processing of short requests, di
 - Linux/macOS systems
 
 ### Cluster Configuration
+
+![a239b3c4-7d28-478b-abc0-e4443221100d](./image/a239b3c4-7d28-478b-abc0-e4443221100d.png)
 
 1. **Prepare Servers**:
    - Dify Main Server: 192.168.1.10 (Running Dify + Main Plugin Node)

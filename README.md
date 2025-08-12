@@ -8,6 +8,8 @@
 
 一个为 Dify Plugin Daemon 设计的智能集群负载均衡系统，无需外部 Kubernetes 等工具，完全内置实现高可用集群功能。
 
+![366fbece-72fe-461f-be36-cabdff46e9d8](./image/366fbece-72fe-461f-be36-cabdff46e9d8.png)
+
 ## 📋 项目概述
 
 本项目在 Dify Plugin Daemon 内部实现了一套完整的集群负载均衡解决方案，主要特点：
@@ -292,6 +294,8 @@ graph TD
 - Linux/macOS 系统
 
 ### 配置集群
+
+![a239b3c4-7d28-478b-abc0-e4443221100d](./image/a239b3c4-7d28-478b-abc0-e4443221100d.png)
 
 1. **准备服务器**：
    - Dify 主服务器: 192.168.1.10 (运行 Dify + Main Plugin Node)
